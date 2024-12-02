@@ -100,7 +100,7 @@ async def predict(
             is_phishing=is_phishing,
             confidence=confidence,
             created_at=date,
-            risk_level='High' if confidence > 0.8 else 'Medium' if confidence > 0.3 else 'Low',
+            risk_level='High' if confidence > 0.8 else 'Medium' if confidence > 0.5 else 'Low',
             model_id = model_id
         )
 

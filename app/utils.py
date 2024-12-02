@@ -155,7 +155,7 @@ def predict_phishing(email_content, model_path):
     
     return {
         'email_content': email_content,
-        'is_phishing': confidence > 0.3,  # True if confidence is greater than 0.5
+        'is_phishing': confidence > 0.5,  # True if confidence is greater than 0.5
         'confidence': confidence
     }
 
