@@ -6,12 +6,14 @@ from typing import List
 from fastapi.responses import JSONResponse, StreamingResponse
 from matplotlib import pyplot as plt
 from pydantic import BaseModel
-from models import predict_phising, worldcloud
+from models import worldcloud, predict_phishing
 import uvicorn
-from schemas import PredictionResponse, EmailContent, PredictionsResponse
+from schemas import PredictionResponse, EmailContent, PredictionsResponse, ModelResponse, ModelsResponse, EmailContentWordCloud
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from models_db import SessionLocal, engine, Prediction, Model
+from models_db import SessionLocal, engine, Prediction, Model, initialize_models
+# Import router
+from fastapi import APIRouter
 
 
 
@@ -21,15 +23,24 @@ app = FastAPI(
     version='0.1',
 )
 
+# Create a router
+router = APIRouter(prefix="/api", tags=["api"])
+
 def get_db():
     db = SessionLocal()
     try:
+        initialize_models(db)
         yield db
     finally:
         db.close()
 
 origins = [
     "http://localhost:3000",
+    "http://localhost",
+    "http://localhost:8000",
+    "http://localhost:8080",
+    "http://localhost:5000",
+    "http://localhost:4200",
 ]
 
 app.add_middleware(
@@ -40,36 +51,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post('/predict', response_model=PredictionResponse)
-async def predict(email_content: EmailContent, db: Session = Depends(get_db)):
+@router.post('/predict', response_model=PredictionResponse)
+async def predict(
+    email_content: EmailContent,
+    db: Session = Depends(get_db)):
     """
     Predict if an email is phishing or not
 
-    - **email_content**: The content of the email
+    - **email_content**: The content of the email and the model name
 
     Returns:
     - **is_phishing**: Whether the email is phishing or not
     - **confidence**: The confidence of the model in the prediction
 
     """
-    try: 
-        prediction = predict_phising(email_content.email_content)
+    try:
+        db_model = db.query(Model).filter(Model.display_name == email_content.model_name).first()
+        if not db_model:
+            raise HTTPException(status_code=404, detail='Model not found')
+        
+        model_path = f'./app/models/{db_model.name}.{db_model.extension}'
+
+        prediction = predict_phishing(email_content.email_content, model_path)
 
         is_phishing = bool(prediction['is_phishing'])
         confidence = float(prediction['confidence'])
         date = datetime.now()
+        model_id = db_model.id
 
-        db_prediction = Prediction(email_content=email_content.email_content, prediction=is_phishing, confidence=confidence, created_at=date)
+        db_prediction = Prediction(
+            email_content=email_content.email_content,
+            prediction=is_phishing,
+            confidence=confidence,
+            model_id=model_id,
+            created_at=date
+        )
 
         db.add(db_prediction)
         db.commit()
-        db.refresh(db_prediction)
 
         response = PredictionResponse(
             is_phishing=is_phishing,
             confidence=confidence,
             created_at=date,
-            risk_level='High' if confidence > 0.5 else 'Low'
+            risk_level='High' if confidence > 0.8 else 'Medium' if confidence > 0.5 else 'Low',
+            model_id = model_id
         )
 
         return response
@@ -77,8 +103,8 @@ async def predict(email_content: EmailContent, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post('/generate_wordcloud')
-async def generate_wordcloud(email_content: EmailContent, db: Session = Depends(get_db)):
+@router.post('/generate_wordcloud')
+async def generate_wordcloud(email_content: EmailContentWordCloud, db: Session = Depends(get_db)):
     """
     Generate a wordcloud for the email content
 
@@ -109,7 +135,7 @@ async def generate_wordcloud(email_content: EmailContent, db: Session = Depends(
 
 
 
-@app.get('/predictions', response_model=PredictionsResponse)
+@router.get('/predictions', response_model=PredictionsResponse)
 async def get_predictions(db: Session = Depends(get_db)):
     """
     Get all predictions
@@ -127,8 +153,12 @@ async def get_predictions(db: Session = Depends(get_db)):
         response = []
         for prediction in predictions:
             response.append({
+                'email_content': prediction.email_content,
                 'is_phishing': prediction.prediction,
-                'confidence': prediction.confidence
+                'confidence': prediction.confidence,
+                'created_at': prediction.created_at,
+                'risk_level': 'High' if prediction.confidence > 0.8 else 'Medium' if prediction.confidence > 0.5 else 'Low',
+                'model_id': prediction.model_id
             })
 
         # print(response)
@@ -139,7 +169,7 @@ async def get_predictions(db: Session = Depends(get_db)):
 
 
 
-@app.post('/predict_file', response_model=PredictionResponse)
+@router.post('/predict_file', response_model=PredictionResponse)
 async def predict_file(file: UploadFile = File(...)):
     """
     Predict if an email is phishing or not
@@ -153,10 +183,10 @@ async def predict_file(file: UploadFile = File(...)):
 
     content = await file.read()
     email_content = content.decode('utf-8')
-    prediction = predict_phising(email_content)
+    prediction = predict_phishing(email_content)
     return prediction
 
-@app.post('/predict_form', response_model=PredictionResponse)
+@router.post('/predict_form', response_model=PredictionResponse)
 async def predict_form(email_content: str = Form(...)):
     """
     Predict if an email is phishing or not
@@ -168,10 +198,76 @@ async def predict_form(email_content: str = Form(...)):
     - **confidence**: The confidence of the model in the prediction
 
     """
-    prediction = predict_phising(email_content)
+    prediction = predict_phishing(email_content)
     return prediction
 
-@app.get('/')
+
+# Get all the display name of the models
+@router.get('/models/names', response_model=List[str])
+async def get_models(db: Session = Depends(get_db)):
+    """
+    Get all available models
+
+    Returns:
+    - **models**: A list of all available models
+    """
+    try:
+        models = db.query(Model).all()
+        response = [model.display_name for model in models]
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+# Get all models and thier ids
+@router.get('/models/ids', response_model=List[ModelResponse])
+async def get_models(db: Session = Depends(get_db)):
+    """
+    Get all available models
+
+    Returns:
+    - **models**: A list of all available models
+    """
+    try:
+        models = db.query(Model).all()
+        return models
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Get all the models
+@router.get('/models', response_model=List[ModelResponse])
+async def get_models(db: Session = Depends(get_db)):
+    """
+    Get all available models
+
+    Returns:
+    - **models**: A list of all available models
+    """
+    try:
+        models = db.query(Model).all()
+        return models
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+# Get a specific model
+@router.get('/models/{model_id}', response_model=ModelResponse)
+async def get_model(model_id: int, db: Session = Depends(get_db)):
+    """
+    Get a specific model
+
+    - **model_id**: The ID of the model
+
+    Returns:
+    - **model**: The model
+    """
+    try:
+        model = db.query(Model).filter(Model.id == model_id).first()
+        if not model:
+            raise HTTPException(status_code=404, detail='Model not found')
+        return model
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get('/')
 async def index():
     return {'text': 'Hello World!'}
 
@@ -191,7 +287,7 @@ async def validation_exception_handler(request, exc):
     )
 
 
-@app.post('/restore')
+@router.post('/restore')
 async def restore(db: Session = Depends(get_db)):
     """
     Restore the database
@@ -207,6 +303,9 @@ async def restore(db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+app.include_router(router)
+
 
 if __name__ == '__main__':
+    get_db()
     uvicorn.run(app, host='0.0.0.0', port=8000)
