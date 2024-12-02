@@ -21,7 +21,9 @@ site_build
 venv
 docs.zip
 archive.zip
+
 mail-parser
+
 
 alembic.ini
 alembic
