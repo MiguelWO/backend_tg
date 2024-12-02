@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models_db import SessionLocal, engine, Prediction, Model, initialize_models
 # Import router
 from fastapi import APIRouter
+import os
 
 
 
@@ -41,6 +42,7 @@ origins = [
     "http://localhost:8080",
     "http://localhost:5000",
     "http://localhost:4200",
+    "https://frontend-tg.vercel.app"
 ]
 
 app.add_middleware(
@@ -98,7 +100,7 @@ async def predict(
             is_phishing=is_phishing,
             confidence=confidence,
             created_at=date,
-            risk_level='High' if confidence > 0.8 else 'Medium' if confidence > 0.5 else 'Low',
+            risk_level='High' if confidence > 0.8 else 'Medium' if confidence > 0.3 else 'Low',
             model_id = model_id
         )
 
@@ -311,5 +313,5 @@ app.include_router(router)
 
 
 if __name__ == '__main__':
-    get_db()
-    uvicorn.run(app, host='0.0.0.0', port=8000)
+    PORT = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host='0.0.0.0', port= PORT)

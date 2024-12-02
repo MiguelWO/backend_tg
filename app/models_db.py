@@ -1,6 +1,7 @@
 from sqlalchemy import Boolean, DateTime, Float, create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker, Session
+import os
 
 Base = declarative_base()
 
@@ -25,9 +26,12 @@ class Model(Base):
     display_name = Column(String)
     predictions = relationship('Prediction', back_populates='model')
 
+
+DATABASE_URL = os.getenv('DATABASE_URL')
+
 # Create an engine that stores data in the local directory's
 # sqlalchemy_example.db file.
-engine = create_engine('sqlite:///sqlalchemy_example.db')
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) 
 
 # Create all tables in the engine. This is equivalent to "Create Table"
