@@ -6,12 +6,12 @@ from typing import List
 from fastapi.responses import JSONResponse, StreamingResponse
 from matplotlib import pyplot as plt
 from pydantic import BaseModel
-from models import worldcloud, predict_phishing
+from app.utils import worldcloud, predict_phishing
 import uvicorn
-from schemas import PredictionResponse, EmailContent, PredictionsResponse, ModelResponse, ModelsResponse, EmailContentWordCloud
+from app.schemas import PredictionResponse, EmailContent, PredictionsResponse, ModelResponse, ModelsResponse, EmailContentWordCloud
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from models_db import SessionLocal, engine, Prediction, Model, initialize_models
+from app.models_db import SessionLocal, engine, Prediction, Model, initialize_models
 # Import router
 from fastapi import APIRouter
 
@@ -50,6 +50,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/ping")
+def pong():
+    return {"ping": "pong!"}
 
 @router.post('/predict', response_model=PredictionResponse)
 async def predict(
